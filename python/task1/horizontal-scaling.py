@@ -270,7 +270,7 @@ def main():
             GroupName='LoadGeneratorSecurityGroup',
             VpcId = VPC_ID
         )
-    sg1.authorize_ingress(IpPermissions=sg_permissions)
+        sg1.authorize_ingress(IpPermissions=sg_permissions)
     sg1_id = sg1.id
 
     sg2 = find_security_group_by_name(ec2,'WebServiceSecurityGroup')
@@ -280,7 +280,7 @@ def main():
             GroupName = 'WebServiceSecurityGroup',
             VpcId = VPC_ID
         )
-    sg2.authorize_ingress(IpPermissions=sg_permissions)
+        sg2.authorize_ingress(IpPermissions=sg_permissions)
     sg2_id = sg2.id
 
     print_section('2 - create LG')
