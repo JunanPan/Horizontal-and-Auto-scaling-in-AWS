@@ -257,7 +257,7 @@ def main():
     sg1 = ec2.create_security_group( # Security group for Load Generator instances
         Description='Security group for Load Generator instances',
         GroupName='LoadGeneratorSecurityGroup',
-        vpc_id = VPC_ID
+        VpcId = VPC_ID
     )
     sg1.authorize_ingress(IpPermissions=sg_permissions)
     sg1_id = sg1.id
