@@ -53,7 +53,7 @@ def create_instance(ami, sg_id):
     :return: instance object
     """
     instance = None
-    # TODO: Create an EC2 instance
+    # Create an EC2 instance
     boto3.setup_default_session(region_name='us-east-1')
     ec2 = boto3.resource('ec2')
     instance = ec2.create_instances(
@@ -98,7 +98,7 @@ def initialize_test(lg_dns, first_web_service_dns):
             time.sleep(1)
             pass 
 
-    # TODO: return log File name
+    # return log File name
     log_file_name = get_test_id(response)
 
     return log_file_name
@@ -241,7 +241,7 @@ def find_security_group_by_name(ec2, group_name):
 # Main routine
 ########################################
 def main():
-    # BIG PICTURE TODO: Provision resources to achieve horizontal scalability
+    # BIG PICTURE Provision resources to achieve horizontal scalability
     #   - Create security groups for Load Generator and Web Service
     #   - Provision a Load Generator instance
     #   - Provision a Web Service instance
@@ -259,7 +259,7 @@ def main():
          }
     ]
 
-    # TODO: Create two separate security groups and obtain the group ids
+    # Create two separate security groups and obtain the group ids
     boto3.setup_default_session(region_name='us-east-1')
     ec2 = boto3.resource('ec2')
 
@@ -285,7 +285,7 @@ def main():
 
     print_section('2 - create LG')
 
-    # TODO: Create Load Generator instance and obtain ID and DNS
+    # Create Load Generator instance and obtain ID and DNS
     boto3.setup_default_session(region_name='us-east-1')
     ec2 = boto3.resource('ec2')
     lg = create_instance(LOAD_GENERATOR_AMI, sg1_id)
@@ -296,7 +296,7 @@ def main():
     print_section('3. Authenticate with the load generator')
     authenticate(lg_dns, SUBMISSION_PASSWORD, SUBMISSION_USERNAME)
 
-    # TODO: Create First Web Service Instance and obtain the DNS
+    # Create First Web Service Instance and obtain the DNS
 
     web_service_instance = create_instance(WEB_SERVICE_AMI, sg2_id)
     web_service_dns = web_service_instance.public_dns_name
@@ -305,8 +305,8 @@ def main():
     log_name = initialize_test(lg_dns, web_service_dns)
     last_launch_time = get_test_start_time(lg_dns, log_name)
     while not is_test_complete(lg_dns, log_name):
-        # TODO: Check RPS and last launch time
-        # TODO: Add New Web Service Instance if Required
+        # Check RPS and last launch time
+        # Add New Web Service Instance if Required
         if get_rps(lg_dns, log_name) < 50:
             last_launch_time = get_test_start_time(lg_dns, log_name)
             #get current time, I mean current, now now!!
@@ -320,13 +320,8 @@ def main():
 
     print_section('End Test')
 
-    # TODO: Terminate Resources
-    boto3.setup_default_session(region_name='us-east-1')
-    ec2 = boto3.resource('ec2')
-    ec2.instances.filter(InstanceIds=[lg_id]).terminate()
-    ec2.instances.filter(InstanceIds=[web_service_instance.instance_id]).terminate()
-    ec2.security_groups.filter(GroupIds=[sg1_id]).delete()
-    ec2.security_groups.filter(GroupIds=[sg2_id]).delete()
+    # Terminate Resources
+    # I will terminate manually 
 
 
 

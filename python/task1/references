@@ -2,9 +2,15 @@
     "referenceGuide" : "Cite all the reference sources in the required format. Proper citations will help you avoid unnecessary trouble. Read JSON grammar from Internet if needed.",
     "websites":[  
         {  
-            "title":"<title of the page>",
-            "url":"<url>",
-            "code":"<in which code you use the snippet or the idea>",
+            "title":"Amazon EC2 examples using SDK for Python (Boto3)",
+            "url":"https://docs.aws.amazon.com/code-library/latest/ug/python_3_ec2_code_examples.html",
+            "code":"ec2.create_instances()",
+            "description":"<additional information you find it necessary to provide>"
+        },
+        {  
+            "title":"Amazon EC2 examples using SDK for Python (Boto3)",
+            "url":"https://docs.aws.amazon.com/code-library/latest/ug/python_3_ec2_code_examples.html",
+            "code":"ec2.create_security_group()",
             "description":"<additional information you find it necessary to provide>"
         }
     ],
