@@ -7,7 +7,11 @@ import time
 import json
 import configparser
 import re
+import datetime
 from dateutil.parser import parse
+
+script_dir = os.path.dirname(os.path.abspath(__file__))
+config_path = os.path.join(script_dir, 'horizontal-scaling-config.json')
 
 
 ########################################
@@ -19,6 +23,7 @@ with open('horizontal-scaling-config.json') as file:
 LOAD_GENERATOR_AMI = configuration['load_generator_ami']
 WEB_SERVICE_AMI = configuration['web_service_ami']
 INSTANCE_TYPE = configuration['instance_type']
+VPC_ID = configuration['vpc_id']
 
 # Credentials fetched from environment variables
 SUBMISSION_USERNAME = os.environ['SUBMISSION_USERNAME']
@@ -47,10 +52,28 @@ def create_instance(ami, sg_id):
     :return: instance object
     """
     instance = None
-
     # TODO: Create an EC2 instance
+    boto3.setup_default_session(region_name='us-east-1')
+    ec2 = boto3.resource('ec2')
+    instance = ec2.create_instances(
+        ImageId=ami,
+        MinCount=1,
+        MaxCount=1,
+        InstanceType=INSTANCE_TYPE,
+        SecurityGroupIds=[sg_id],
+        TagSpecifications=[
+            {
+                'ResourceType': 'instance',
+                'Tags': TAGS
+            }
+        ]
+    )[0]
     # Wait for the instance to enter the running state
+    instance.wait_until_running()
+
     # Reload the instance attributes
+    instance.load()
+
 
     return instance
 
@@ -75,7 +98,9 @@ def initialize_test(lg_dns, first_web_service_dns):
             pass 
 
     # TODO: return log File name
-    return ""
+    log_file_name = get_test_id(response)
+
+    return log_file_name
 
 
 def print_section(msg):
@@ -227,22 +252,41 @@ def main():
     ]
 
     # TODO: Create two separate security groups and obtain the group ids
-    sg1_id = None  # Security group for Load Generator instances
-    sg2_id = None  # Security group for Web Service instances
+    boto3.setup_default_session(region_name='us-east-1')
+    ec2 = boto3.resource('ec2')
+    sg1 = ec2.create_security_group( # Security group for Load Generator instances
+        Description='Security group for Load Generator instances',
+        GroupName='LoadGeneratorSecurityGroup',
+        vpc_id = VPC_ID
+    )
+    sg1.authorize_ingress(IpPermissions=sg_permissions)
+    sg1_id = sg1.id
+
+    sg2 = ec2.create_security_group( # Security group for Web Service instances
+        Description = 'Security group for Web Service instances',
+        GroupName = 'WebServiceSecurityGroup',
+        VpcId = VPC_ID
+    )
+    sg2.authorize_ingress(IpPermissions=sg_permissions)
+    sg2_id = sg2.id
 
     print_section('2 - create LG')
 
     # TODO: Create Load Generator instance and obtain ID and DNS
-    lg = ''
-    lg_id = ''
-    lg_dns = ''
+    boto3.setup_default_session(region_name='us-east-1')
+    ec2 = boto3.resource('ec2')
+    lg = create_instance(LOAD_GENERATOR_AMI, sg1_id)
+    lg_id = lg.instance_id
+    lg_dns = lg.public_dns_name
     print("Load Generator running: id={} dns={}".format(lg_id, lg_dns))
 
     print_section('3. Authenticate with the load generator')
     authenticate(lg_dns, SUBMISSION_PASSWORD, SUBMISSION_USERNAME)
 
     # TODO: Create First Web Service Instance and obtain the DNS
-    web_service_dns = ''
+
+    web_service_instance = create_instance(WEB_SERVICE_AMI, sg2_id)
+    web_service_dns = web_service_instance.public_dns_name
 
     print_section('4. Submit the first WS instance DNS to LG, starting test.')
     log_name = initialize_test(lg_dns, web_service_dns)
@@ -250,11 +294,27 @@ def main():
     while not is_test_complete(lg_dns, log_name):
         # TODO: Check RPS and last launch time
         # TODO: Add New Web Service Instance if Required
+        if get_rps(lg_dns, log_name) < 50:
+            last_launch_time = get_test_start_time(lg_dns, log_name)
+            #get current time, I mean current, now now!!
+            current_time = datetime.datetime.now()
+            if current_time - last_launch_time > 100:
+                add_web_service_instance(lg_dns, sg2_id, log_name)
+                last_launch_time = current_time
+
+
         time.sleep(1)
 
     print_section('End Test')
 
     # TODO: Terminate Resources
+    boto3.setup_default_session(region_name='us-east-1')
+    ec2 = boto3.resource('ec2')
+    ec2.instances.filter(InstanceIds=[lg_id]).terminate()
+    ec2.instances.filter(InstanceIds=[web_service_instance.instance_id]).terminate()
+    ec2.security_groups.filter(GroupIds=[sg1_id]).delete()
+    ec2.security_groups.filter(GroupIds=[sg2_id]).delete()
+
 
 
 if __name__ == '__main__':
