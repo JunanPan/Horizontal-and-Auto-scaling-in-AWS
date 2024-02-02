@@ -230,7 +230,7 @@ def get_test_start_time(lg_dns, log_name):
     return parse(start_time)
 
 
-def find_security_group_by_name(group_name):
+def find_security_group_by_name(ec2, group_name):
     security_groups = list(ec2.security_groups.filter(Filters=[{'Name': 'group-name', 'Values': [group_name]}]))
     if security_groups:
         return security_groups[0]
@@ -262,7 +262,8 @@ def main():
     # TODO: Create two separate security groups and obtain the group ids
     boto3.setup_default_session(region_name='us-east-1')
     ec2 = boto3.resource('ec2')
-    sg1 = find_security_group_by_name('LoadGeneratorSecurityGroup')
+
+    sg1 = find_security_group_by_name(ec2,'LoadGeneratorSecurityGroup')
     if not sg1:
         sg1 = ec2.create_security_group( # Security group for Load Generator instances
             Description='Security group for Load Generator instances',
@@ -272,7 +273,7 @@ def main():
     sg1.authorize_ingress(IpPermissions=sg_permissions)
     sg1_id = sg1.id
 
-    sg2 = find_security_group_by_name('WebServiceSecurityGroup')
+    sg2 = find_security_group_by_name(ec2,'WebServiceSecurityGroup')
     if not sg2:
         sg2 = ec2.create_security_group( # Security group for Web Service instances
             Description = 'Security group for Web Service instances',
