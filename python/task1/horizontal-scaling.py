@@ -230,6 +230,13 @@ def get_test_start_time(lg_dns, log_name):
     return parse(start_time)
 
 
+def find_security_group_by_name(group_name):
+    security_groups = list(ec2.security_groups.filter(Filters=[{'Name': 'group-name', 'Values': [group_name]}]))
+    if security_groups:
+        return security_groups[0]
+    else:
+        return None
+
 ########################################
 # Main routine
 ########################################
@@ -255,19 +262,23 @@ def main():
     # TODO: Create two separate security groups and obtain the group ids
     boto3.setup_default_session(region_name='us-east-1')
     ec2 = boto3.resource('ec2')
-    sg1 = ec2.create_security_group( # Security group for Load Generator instances
-        Description='Security group for Load Generator instances',
-        GroupName='LoadGeneratorSecurityGroup',
-        VpcId = VPC_ID
-    )
+    sg1 = find_security_group_by_name('LoadGeneratorSecurityGroup')
+    if not sg1:
+        sg1 = ec2.create_security_group( # Security group for Load Generator instances
+            Description='Security group for Load Generator instances',
+            GroupName='LoadGeneratorSecurityGroup',
+            VpcId = VPC_ID
+        )
     sg1.authorize_ingress(IpPermissions=sg_permissions)
     sg1_id = sg1.id
 
-    sg2 = ec2.create_security_group( # Security group for Web Service instances
-        Description = 'Security group for Web Service instances',
-        GroupName = 'WebServiceSecurityGroup',
-        VpcId = VPC_ID
-    )
+    sg2 = find_security_group_by_name('WebServiceSecurityGroup')
+    if not sg2:
+        sg2 = ec2.create_security_group( # Security group for Web Service instances
+            Description = 'Security group for Web Service instances',
+            GroupName = 'WebServiceSecurityGroup',
+            VpcId = VPC_ID
+        )
     sg2.authorize_ingress(IpPermissions=sg_permissions)
     sg2_id = sg2.id
 
