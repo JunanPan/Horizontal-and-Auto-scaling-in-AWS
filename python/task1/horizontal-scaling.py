@@ -8,6 +8,7 @@ import json
 import configparser
 import re
 import datetime
+import pytz
 from dateutil.parser import parse
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -297,8 +298,8 @@ def main():
         if get_rps(lg_dns, log_name) < 50:
             last_launch_time = get_test_start_time(lg_dns, log_name)
             #get current time, I mean current, now now!!
-            current_time = datetime.datetime.now()
-            if current_time - last_launch_time > 100:
+            current_time = datetime.datetime.now(pytz.utc)
+            if current_time - last_launch_time > datetime.timedelta(seconds=100):
                 add_web_service_instance(lg_dns, sg2_id, log_name)
                 last_launch_time = current_time
 
