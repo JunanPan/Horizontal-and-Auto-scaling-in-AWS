@@ -232,6 +232,13 @@ def authenticate(load_generator_dns, submission_password, submission_username):
         except requests.exceptions.ConnectionError:
             pass
 
+        
+def find_security_group_by_name(ec2, group_name):
+    security_groups = list(ec2.security_groups.filter(Filters=[{'Name': 'group-name', 'Values': [group_name]}]))
+    if security_groups:
+        return security_groups[0]
+    else:
+        return None
 
 ########################################
 # Main routine
