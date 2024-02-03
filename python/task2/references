@@ -6,6 +6,12 @@
             "url":"<url>",
             "code":"<in which code you use the snippet or the idea>",
             "description":"<additional information you find it necessary to provide>"
+        },
+        {  
+            "title":"put-metric-alarm",
+            "url":"https://docs.aws.amazon.com/cli/latest/reference/cloudwatch/put-metric-alarm.html",
+            "code":"<in which code you use the snippet or the idea>",
+            "description":"<additional information you find it necessary to provide>"
         }
     ],
     "collaborators":[

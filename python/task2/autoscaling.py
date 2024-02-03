@@ -16,6 +16,8 @@ with open('auto-scaling-config.json') as file:
 LOAD_GENERATOR_AMI = configuration['load_generator_ami']
 WEB_SERVICE_AMI = configuration['web_service_ami']
 INSTANCE_TYPE = configuration['instance_type']
+VPC_ID = configuration['vpc_id']
+
 SUBMISSION_USERNAME = os.environ['SUBMISSION_USERNAME']
 SUBMISSION_PASSWORD = os.environ['SUBMISSION_PASSWORD']
 
@@ -41,9 +43,25 @@ def create_instance(ami, sg_id):
     :param sg_id: ID of the security group to be attached to instance
     :return: instance object
     """
+    # Create an EC2 instance
     instance = None
-
-    # TODO: Create an EC2 instance
+    boto3.setup_default_session(region_name='us-east-1')
+    ec2 = boto3.resource('ec2')
+    instance = ec2.create_instances(
+        ImageId=ami,
+        MinCount=1,
+        MaxCount=1,
+        InstanceType=INSTANCE_TYPE,
+        SecurityGroupIds=[sg_id],
+        TagSpecifications=[
+            {
+                'ResourceType': 'instance',
+                'Tags': TAGS
+            }
+        ]
+    )[0]
+    # Wait for the instance to enter the running state
+    instance.wait_until_running()
 
     return instance
 
@@ -67,8 +85,9 @@ def initialize_test(load_generator_dns, first_web_service_dns):
             time.sleep(1)
             pass 
 
-    # TODO: return log File name
-    return ""
+    # return log File name
+    log_file_name = get_test_id(response)
+    return log_file_name
 
 
 def initialize_warmup(load_generator_dns, load_balancer_dns):
@@ -90,8 +109,9 @@ def initialize_warmup(load_generator_dns, load_balancer_dns):
             time.sleep(1)
             pass  
 
-    # TODO: return log File name
-    return ""
+    # return log File name
+    log_file_name = get_test_id(response)
+    return log_file_name
 
 
 def get_test_id(response):
@@ -107,7 +127,7 @@ def get_test_id(response):
     return regexpr.findall(response_text)[0]
 
 
-def destroy_resources():
+def destroy_resources(sg1, sg2, lg, lt, tg, lb, asg, scale_up_policy_arn, scale_down_policy_arn, cloudwatch):
     """
     Delete all resources created for this task
 
@@ -124,6 +144,45 @@ def destroy_resources():
     :return: None
     """
     # TODO: implement this method
+    # delete all resources
+    # delete the ASG
+    asg.delete_auto_scaling_group(
+        AutoScalingGroupName='WebServerASG'
+    )
+    # delete the launch template
+    lt.delete_launch_template(
+        LaunchTemplateName='WebServerTemplate'
+    )
+    # delete the load balancer
+    elbv2.delete_load_balancer(
+        LoadBalancerArn=lb_arn
+    )
+    # delete the target group
+    elbv2.delete_target_group(
+        TargetGroupArn=tg_arn
+    )
+    # delete the security groups
+    sg1.delete()
+    sg2.delete()
+    # delete the load generator
+    lg.terminate()
+    # delete the scaling policies
+    asg.delete_policy(
+        PolicyName='ScaleUp'
+    )
+    asg.delete_policy(
+        PolicyName='ScaleDown'
+    )
+    # delete the cloudwatch alarms
+    cloudwatch.delete_alarms(
+        AlarmNames=[
+            'ScaleUp',
+            'ScaleDown'
+        ]
+    )
+
+
+
     pass
 
 
@@ -201,44 +260,212 @@ def main():
          }
     ]
 
-    # TODO: create two separate security groups and obtain the group ids
-    sg1_id = None  # Security group for Load Generator instances
-    sg2_id = None  # Security group for ASG, ELB instances
+    # create two separate security groups and obtain the group ids
+    boto3.setup_default_session(region_name='us-east-1')
+    ec2 = boto3.resource('ec2')
+
+    # Security group for Load Generator instances
+    sg1 = find_security_group_by_name(ec2,'LoadGeneratorSecurityGroup')
+    if not sg1:
+        sg1 = ec2.create_security_group( 
+            Description='Security group for Load Generator instances',
+            GroupName='LoadGeneratorSecurityGroup',
+            VpcId = VPC_ID
+        )
+        sg1.authorize_ingress(IpPermissions=sg_permissions)
+    sg1_id = sg1.id
+
+    # Security group for ASG, ELB instances
+    sg2 = find_security_group_by_name(ec2,"ASG_ELBSecurityGroup")
+    if not sg2:
+        sg2 = ec2.create_security_group(
+            Description = 'Security group for ASG, ELB instances',
+            GroupName = 'ASG_ELBSecurityGroup',
+            VpcId = VPC_ID
+        )
+        sg2.authorize_ingress(IpPermissions=sg_permissions)
+    sg2_id = sg2.id
 
     print_section('2 - create LG')
 
-    # TODO: Create Load Generator instance and obtain ID and DNS
-    lg = ''
-    lg_id = ''
-    lg_dns = ''
+    # Create Load Generator instance and obtain ID and DNS
+    boto3.setup_default_session(region_name='us-east-1')
+    ec2 = boto3.resource('ec2')
+    lg = create_instance(LOAD_GENERATOR_AMI, sg1_id)
+    lg_id = lg.id
+    lg_dns = lg.public_dns_name
+
     print("Load Generator running: id={} dns={}".format(lg_id, lg_dns))
 
     print_section('3. Create LT (Launch Template)')
-    # TODO: create launch Template
-
+    # create launch Template
+    boto3.setup_default_session(region_name='us-east-1')
+    ec2 = boto3.client('ec2')
+    lt = ec2.create_launch_template(
+        LaunchTemplateName='WebServerTemplate',
+        LaunchTemplateData={
+            'ImageId': WEB_SERVICE_AMI,
+            'InstanceType': INSTANCE_TYPE,
+            'SecurityGroupIds': [sg2_id],
+            'TagSpecifications': [
+                {
+                    'ResourceType': 'instance',
+                    'Tags': TAGS
+                }
+            ]
+        }
+    )
     print_section('4. Create TG (Target Group)')
     # TODO: create Target Group
-    tg_arn = ''
+    boto3.setup_default_session(region_name='us-east-1')
+    elbv2 = boto3.client('elbv2')
+    tg = elbv2.create_target_group(
+        Name='WebServerTargetGroup',
+        Protocol='HTTP',
+        Port=80,
+        VpcId=VPC_ID,
+        HealthCheckProtocol='HTTP',
+        HealthCheckPort='80',
+        HealthCheckPath='/',
+        HealthCheckIntervalSeconds=50,
+        HealthCheckTimeoutSeconds=10,
+        HealthyThresholdCount=2,
+        UnhealthyThresholdCount=2,
+        TargetType='instance'
+    )
+    tg_arn = tg['TargetGroups'][0]['TargetGroupArn']
+
 
     print_section('5. Create ELB (Elastic/Application Load Balancer)')
 
     # TODO create Load Balancer
     # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/elbv2.html
-    lb_arn = ''
-    lb_dns = ''
+    boto3.setup_default_session(region_name='us-east-1')
+    elbv2 = boto3.client('elbv2')
+    lb = elbv2.create_load_balancer(
+        Name='WebServerLoadBalancer',
+        Subnets=[
+            'subnet-0a704a99fa14a64c4',
+            'subnet-00bc4aa1925ecc48a'
+        ],
+        SecurityGroups=[
+            sg2_id
+        ],
+        Scheme='internet-facing',
+        Tags=TAGS
+    )
+
+    lb_arn = lb['LoadBalancers'][0]['LoadBalancerArn']
+    lb_dns = lb['LoadBalancers'][0]['DNSName']
+
     print("lb started. ARN={}, DNS={}".format(lb_arn, lb_dns))
 
     print_section('6. Associate ELB with target group')
     # TODO Associate ELB with target group
+    boto3.setup_default_session(region_name='us-east-1')
+    elbv2 = boto3.client('elbv2')
+    elbv2.register_targets(
+        TargetGroupArn=tg_arn,
+        Targets=[
+            {
+                'Id': lg_id
+            }
+        ]
+    )
 
     print_section('7. Create ASG (Auto Scaling Group)')
     # TODO create Autoscaling group
+    boto3.setup_default_session(region_name='us-east-1')
+    asg = boto3.client('autoscaling')
+    asg.create_auto_scaling_group(
+        AutoScalingGroupName='WebServerASG',
+        LaunchTemplate={
+            'LaunchTemplateName': 'WebServerTemplate',
+            'Version': '$Latest'
+        },
+        MinSize=1,
+        MaxSize=5,
+        DesiredCapacity=2,
+        VPCZoneIdentifier='subnet-0a704a99fa14a64c4,subnet-00bc4aa1925ecc48a',
+        TargetGroupARNs=[
+            tg_arn
+        ],
+        Tags=TAGS
+    )
 
     print_section('8. Create policy and attached to ASG')
     # TODO Create Simple Scaling Policies for ASG
+    asg.put_scaling_policy(
+        AutoScalingGroupName='WebServerASG',
+        PolicyName='ScaleUp',
+        PolicyType='SimpleScaling',
+        AdjustmentType='ChangeInCapacity',
+        ScalingAdjustment=1,
+        Cooldown=100
+    )
+    scale_up_policy_arn = asg.describe_policies(
+        AutoScalingGroupName='WebServerASG',
+        PolicyNames=[
+            'ScaleUp'
+        ]
+    )['ScalingPolicies'][0]['PolicyARN']
+
+    asg.put_scaling_policy(
+        AutoScalingGroupName='WebServerASG',
+        PolicyName='ScaleDown',
+        PolicyType='SimpleScaling',
+        AdjustmentType='ChangeInCapacity',
+        ScalingAdjustment=-1,
+        Cooldown=100
+    )
+    scale_down_policy_arn = asg.describe_policies(
+        AutoScalingGroupName='WebServerASG',
+        PolicyNames=[
+            'ScaleDown'
+        ]
+    )['ScalingPolicies'][0]['PolicyARN']
 
     print_section('9. Create Cloud Watch alarm. Action is to invoke policy.')
     # TODO create CloudWatch Alarms and link Alarms to scaling policies
+    cloudwatch = boto3.client('cloudwatch')
+    cloudwatch.put_metric_alarm(
+        AlarmName='ScaleUp',
+        ComparisonOperator='GreaterThanThreshold',
+        EvaluationPeriods=1,
+        MetricName='CPUUtilization',
+        Namespace='AWS/EC2',
+        Period=60,
+        Statistic='Average',
+        Threshold=90.0,
+        ActionsEnabled=True,
+        AlarmActions=[scale_up_policy_arn],
+        AlarmDescription='Alarm when server CPU exceeds 90%',
+        Dimensions=[
+            {
+                'Name': 'AutoScalingGroupName',
+                'Value': 'WebServerASG'
+            },
+        ],
+    )
+    cloudwatch.put_metric_alarm(
+        AlarmName='ScaleDown',
+        ComparisonOperator='LessThanThreshold',
+        EvaluationPeriods=1,
+        MetricName='CPUUtilization',
+        Namespace='AWS/EC2',
+        Period=60,
+        Statistic='Average',
+        Threshold=10.0,
+        ActionsEnabled=True,
+        AlarmActions=[scale_down_policy_arn],
+        AlarmDescription='Alarm when server CPU is less than 10%',
+        Dimensions=[
+            {
+                'Name': 'AutoScalingGroupName',
+                'Value': 'WebServerASG'
+            },
+        ],
+    )
 
     print_section('10. Authenticate with the load generator')
     authenticate(lg_dns, SUBMISSION_PASSWORD, SUBMISSION_USERNAME)
