@@ -117,7 +117,14 @@ resource "aws_autoscaling_group" "asg" {
 }
 
 # TODO: Create a Load Generator AWS instance with proper tags
-
+#Create a Load Generator instance of size m5.large using ami-0d196471a996e58d6
+resource "aws_instance" "lg" {
+  ami           = "ami-0d196471a996e58d6"
+  instance_type = "m5.large"
+  key_name      = "vm-scaling"
+  security_groups = [aws_security_group.lg.id]
+  tags = local.common_tags
+}
 # Step 2:
 # TODO: Create an Application Load Balancer with appropriate listeners and target groups
 # The lb_listener documentation demonstrates how to connect these resources
@@ -133,7 +140,7 @@ resource "aws_lb" "web_alb" {
   internal           = false
   load_balancer_type = "application"
   security_groups    = [aws_security_group.elb_asg.id]
-  subnets            = ["subnet-08e73a11df716f54a", "subnet-026ce3ce52d2b37c0"]
+  subnets            = ["subnet-0a704a99fa14a64c4","subnet-08e73a11df716f54a", "subnet-026ce3ce52d2b37c0","subnet-070555da414db9915"]
 
   enable_deletion_protection = false
 
