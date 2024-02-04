@@ -62,7 +62,7 @@ def create_instance(ami, sg_id):
     )[0]
     # Wait for the instance to enter the running state
     instance.wait_until_running()
-
+    instance.load()
     return instance
 
 
@@ -101,6 +101,7 @@ def initialize_warmup(load_generator_dns, load_balancer_dns):
     add_ws_string = 'http://{}/warmup?dns={}'.format(
         load_generator_dns, load_balancer_dns
     )
+    # print(add_ws_string)
     response = None
     while not response or response.status_code != 200:
         try:
@@ -149,13 +150,13 @@ def destroy_resources(sg1, sg2, lg, lt, tg, lb, asg, scale_up_policy_arn, scale_
     asg.delete_auto_scaling_group(
         AutoScalingGroupName='WebServerASG'
     )
-    # delete the launch template
-    lt.delete_launch_template(
-        LaunchTemplateName='WebServerTemplate'
-    )
     # delete the load balancer
     elbv2.delete_load_balancer(
         LoadBalancerArn=lb_arn
+    )
+    # delete the launch template
+    lt.delete_launch_template(
+        LaunchTemplateName='WebServerTemplate'
     )
     # delete the target group
     elbv2.delete_target_group(
@@ -274,13 +275,19 @@ def main():
     # Security group for Load Generator instances
     sg1 = find_security_group_by_name(ec2,'LoadGeneratorSecurityGroup')
     if not sg1:
-        sg1 = ec2.create_security_group( 
+        sg1 = ec2.create_security_group(
             Description='Security group for Load Generator instances',
             GroupName='LoadGeneratorSecurityGroup',
-            VpcId = VPC_ID
+            TagSpecifications=[
+                {
+                    'ResourceType': 'security-group',
+                    'Tags': TAGS
+                }
+            ]
         )
         sg1.authorize_ingress(IpPermissions=PERMISSIONS)
     sg1_id = sg1.id
+
 
     # Security group for ASG, ELB instances
     sg2 = find_security_group_by_name(ec2,"ASG_ELBSecurityGroup")
@@ -288,10 +295,16 @@ def main():
         sg2 = ec2.create_security_group(
             Description = 'Security group for ASG, ELB instances',
             GroupName = 'ASG_ELBSecurityGroup',
-            VpcId = VPC_ID
+            TagSpecifications=[
+                {
+                    'ResourceType': 'security-group',
+                    'Tags': TAGS
+                }
+            ]
         )
         sg2.authorize_ingress(IpPermissions=PERMISSIONS)
     sg2_id = sg2.id
+
 
     print_section('2 - create LG')
 
@@ -308,12 +321,17 @@ def main():
     # create launch Template
     boto3.setup_default_session(region_name='us-east-1')
     ec2 = boto3.client('ec2')
-    lt = ec2.create_launch_template(
+    lt = None
+
+    ec2.create_launch_template(
         LaunchTemplateName='WebServerTemplate',
         LaunchTemplateData={
             'ImageId': WEB_SERVICE_AMI,
             'InstanceType': INSTANCE_TYPE,
             'SecurityGroupIds': [sg2_id],
+            'Monitoring': {
+                'Enabled': True 
+                },
             'TagSpecifications': [
                 {
                     'ResourceType': 'instance',
@@ -322,24 +340,26 @@ def main():
             ]
         }
     )
+
+
     print_section('4. Create TG (Target Group)')
     # TODO: create Target Group
+
+
     boto3.setup_default_session(region_name='us-east-1')
     elbv2 = boto3.client('elbv2')
+
     tg = elbv2.create_target_group(
         Name='WebServerTargetGroup',
         Protocol='HTTP',
         Port=80,
         VpcId=VPC_ID,
         HealthCheckProtocol='HTTP',
-        HealthCheckPort='80',
         HealthCheckPath='/',
-        HealthCheckIntervalSeconds=50,
-        HealthCheckTimeoutSeconds=10,
-        HealthyThresholdCount=2,
-        UnhealthyThresholdCount=2,
-        TargetType='instance'
+        TargetType='instance',
+        Tags=TAGS
     )
+
     tg_arn = tg['TargetGroups'][0]['TargetGroupArn']
 
 
@@ -352,18 +372,25 @@ def main():
     lb = elbv2.create_load_balancer(
         Name='WebServerLoadBalancer',
         Subnets=[
-            'subnet-0a704a99fa14a64c4',
-            'subnet-00bc4aa1925ecc48a'
+            'subnet-08e73a11df716f54a',
+            'subnet-026ce3ce52d2b37c0', 
         ],
+
         SecurityGroups=[
             sg2_id
         ],
-        Scheme='internet-facing',
-        Tags=TAGS
+        Tags=TAGS,
+        Type = 'application'
     )
-
     lb_arn = lb['LoadBalancers'][0]['LoadBalancerArn']
-    lb_dns = lb['LoadBalancers'][0]['DNSName']
+    #wait until the load balancer is ready
+    while True:
+        response = elbv2.describe_load_balancers(LoadBalancerArns=[lb_arn])
+        if response['LoadBalancers'][0]['State']['Code'] == 'active':
+            lb_dns = response['LoadBalancers'][0]['DNSName']
+            break
+        time.sleep(1)
+
 
     print("lb started. ARN={}, DNS={}".format(lb_arn, lb_dns))
 
@@ -371,14 +398,19 @@ def main():
     # TODO Associate ELB with target group
     boto3.setup_default_session(region_name='us-east-1')
     elbv2 = boto3.client('elbv2')
-    elbv2.register_targets(
-        TargetGroupArn=tg_arn,
-        Targets=[
+    elbv2.create_listener(
+        LoadBalancerArn=lb_arn, 
+        Protocol='HTTP',
+        Port=80,
+        DefaultActions=[
             {
-                'Id': lg_id
+                'Type': 'forward',
+                'TargetGroupArn': tg_arn 
             }
-        ]
+        ],
+        Tags=TAGS
     )
+
 
     print_section('7. Create ASG (Auto Scaling Group)')
     # TODO create Autoscaling group
@@ -392,24 +424,41 @@ def main():
         },
         MinSize=1,
         MaxSize=5,
-        DesiredCapacity=2,
-        VPCZoneIdentifier='subnet-0a704a99fa14a64c4,subnet-00bc4aa1925ecc48a',
+        DesiredCapacity=1,
+        DefaultCooldown=20,
+        HealthCheckGracePeriod=80,
+        AvailabilityZones=[
+            'us-east-1a',
+            'us-east-1b'
+        ],
         TargetGroupARNs=[
             tg_arn
         ],
         Tags=TAGS
     )
 
+
     print_section('8. Create policy and attached to ASG')
     # TODO Create Simple Scaling Policies for ASG
+    boto3.setup_default_session(region_name='us-east-1')
+    asg = boto3.client('autoscaling')
     asg.put_scaling_policy(
         AutoScalingGroupName='WebServerASG',
         PolicyName='ScaleUp',
         PolicyType='SimpleScaling',
         AdjustmentType='ChangeInCapacity',
         ScalingAdjustment=1,
-        Cooldown=100
+        Cooldown=20
     )
+    asg.put_scaling_policy(
+        AutoScalingGroupName='WebServerASG',
+        PolicyName='ScaleDown',
+        PolicyType='SimpleScaling',
+        AdjustmentType='ChangeInCapacity',
+        ScalingAdjustment=-1,
+        Cooldown=20
+    )
+
     scale_up_policy_arn = asg.describe_policies(
         AutoScalingGroupName='WebServerASG',
         PolicyNames=[
@@ -417,14 +466,7 @@ def main():
         ]
     )['ScalingPolicies'][0]['PolicyARN']
 
-    asg.put_scaling_policy(
-        AutoScalingGroupName='WebServerASG',
-        PolicyName='ScaleDown',
-        PolicyType='SimpleScaling',
-        AdjustmentType='ChangeInCapacity',
-        ScalingAdjustment=-1,
-        Cooldown=100
-    )
+
     scale_down_policy_arn = asg.describe_policies(
         AutoScalingGroupName='WebServerASG',
         PolicyNames=[
@@ -434,19 +476,21 @@ def main():
 
     print_section('9. Create Cloud Watch alarm. Action is to invoke policy.')
     # TODO create CloudWatch Alarms and link Alarms to scaling policies
+    boto3.setup_default_session(region_name='us-east-1')
     cloudwatch = boto3.client('cloudwatch')
     cloudwatch.put_metric_alarm(
         AlarmName='ScaleUp',
-        ComparisonOperator='GreaterThanThreshold',
-        EvaluationPeriods=1,
+        AlarmDescription='Alarm when server CPU exceeds 80%',
+        AlarmActions=[scale_up_policy_arn],
+        ComparisonOperator='GreaterThanOrEqualToThreshold',
+        EvaluationPeriods=2,
         MetricName='CPUUtilization',
+        Unit='Percent',
         Namespace='AWS/EC2',
         Period=60,
         Statistic='Average',
-        Threshold=90.0,
+        Threshold=80.0,
         ActionsEnabled=True,
-        AlarmActions=[scale_up_policy_arn],
-        AlarmDescription='Alarm when server CPU exceeds 90%',
         Dimensions=[
             {
                 'Name': 'AutoScalingGroupName',
@@ -456,16 +500,16 @@ def main():
     )
     cloudwatch.put_metric_alarm(
         AlarmName='ScaleDown',
-        ComparisonOperator='LessThanThreshold',
+        ComparisonOperator='LessThanOrEqualToThreshold',
         EvaluationPeriods=1,
         MetricName='CPUUtilization',
         Namespace='AWS/EC2',
         Period=60,
         Statistic='Average',
-        Threshold=10.0,
+        Threshold=20.0,
         ActionsEnabled=True,
         AlarmActions=[scale_down_policy_arn],
-        AlarmDescription='Alarm when server CPU is less than 10%',
+        AlarmDescription='Alarm when server CPU is less than 20%',
         Dimensions=[
             {
                 'Name': 'AutoScalingGroupName',
@@ -488,7 +532,7 @@ def main():
     while not is_test_complete(lg_dns, log_name):
         time.sleep(1)
 
-    destroy_resources()
+    # destroy_resources()
 
 
 if __name__ == "__main__":
