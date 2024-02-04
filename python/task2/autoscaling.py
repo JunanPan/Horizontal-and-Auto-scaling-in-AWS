@@ -146,7 +146,7 @@ def get_test_id(response):
     return regexpr.findall(response_text)[0]
 
 
-def destroy_resources(sg1, sg2, lg, lb_arn, asg, cloudwatch):
+def destroy_resources(sg1, sg2, lg, lb_arn, tg_arn ,asg, cloudwatch):
     """
     Delete all resources created for this task
 
@@ -578,7 +578,7 @@ def main():
     while not is_test_complete(lg_dns, log_name):
         time.sleep(1)
 
-    destroy_resources(sg1, sg2, lg, lb_arn, asg, cloudwatch)
+    destroy_resources(sg1, sg2, lg, lb_arn,tg_arn ,asg, cloudwatch)
 
 
 if __name__ == "__main__":
