@@ -135,13 +135,17 @@ resource "aws_instance" "lg" {
 # https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lb_listener
 # https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lb_target_group
 
+
+data "aws_subnet_ids" "selected" {
+  vpc_id = "vpc-0b5feaf149c44ba00"
+}
+
 resource "aws_lb" "web_alb" {
   name               = "WebServerLoadBalancer"
   internal           = false
   load_balancer_type = "application"
   security_groups    = [aws_security_group.elb_asg.id]
-  subnets            = ["subnet-0a704a99fa14a64c4","subnet-08e73a11df716f54a", "subnet-026ce3ce52d2b37c0","subnet-070555da414db9915"]
-
+  subnets            = data.aws_subnet_ids.selected.ids
   enable_deletion_protection = false
 
   tags = local.common_tags
