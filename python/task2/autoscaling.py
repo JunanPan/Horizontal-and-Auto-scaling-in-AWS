@@ -397,6 +397,11 @@ def main():
         VpcId=VPC_ID,
         HealthCheckProtocol='HTTP',
         HealthCheckPath='/',
+        HealthCheckPort='80',
+        HealthCheckIntervalSeconds=30,
+        HealthCheckTimeoutSeconds=5,
+        HealthyThresholdCount=3,
+        UnhealthyThresholdCount=2,
         TargetType='instance',
         Tags=TAGS
     )
@@ -421,7 +426,7 @@ def main():
             sg2_id
         ],
         Tags=TAGS,
-        Type = 'application'
+        Type = 'application',
     )
     lb_arn = lb['LoadBalancers'][0]['LoadBalancerArn']
     #wait until the load balancer is ready
