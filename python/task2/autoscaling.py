@@ -463,8 +463,8 @@ def main():
             'LaunchTemplateName': LAUNCH_TEMPLATE_NAME,
             'Version': '$Latest'
         },
-        MinSize = ASG_MAX_SIZE,
-        MaxSize = ASG_MIN_SIZE,
+        MinSize = ASG_MIN_SIZE,
+        MaxSize = ASG_MAX_SIZE,
         DesiredCapacity=1,
         DefaultCooldown= ASG_DEFAULT_COOL_DOWN_PERIOD,
         HealthCheckGracePeriod= HEALTH_CHECK_GRACE_PERIOD,
