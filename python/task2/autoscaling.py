@@ -17,6 +17,14 @@ LOAD_GENERATOR_AMI = configuration['load_generator_ami']
 WEB_SERVICE_AMI = configuration['web_service_ami']
 INSTANCE_TYPE = configuration['instance_type']
 VPC_ID = configuration['vpc_id']
+ASG_MAX_SIZE = configuration['asg_max_size']
+ASG_MIN_SIZE = configuration['asg_min_size']
+HEALTH_CHECK_GRACE_PERIOD = configuration['health_check_grace_period']
+
+
+LOAD_BALANCER_NAME = configuration['load_balancer_name']
+LAUNCH_TEMPLATE_NAME = configuration['launch_template_name']
+AUTO_SCALING_GROUP_NAME = configuration['auto_scaling_group_name']
 
 SUBMISSION_USERNAME = os.environ['SUBMISSION_USERNAME']
 SUBMISSION_PASSWORD = os.environ['SUBMISSION_PASSWORD']
@@ -156,7 +164,7 @@ def destroy_resources(sg1, sg2, lg, lt, tg, lb, asg, scale_up_policy_arn, scale_
     )
     # delete the launch template
     lt.delete_launch_template(
-        LaunchTemplateName='WebServerTemplate'
+        LaunchTemplateName=  LAUNCH_TEMPLATE_NAME
     )
     # delete the target group
     elbv2.delete_target_group(
@@ -370,7 +378,7 @@ def main():
     boto3.setup_default_session(region_name='us-east-1')
     elbv2 = boto3.client('elbv2')
     lb = elbv2.create_load_balancer(
-        Name='WebServerLoadBalancer',
+        Name= LOAD_BALANCER_NAME,
         Subnets=[
             'subnet-08e73a11df716f54a',
             'subnet-026ce3ce52d2b37c0', 
@@ -417,13 +425,13 @@ def main():
     boto3.setup_default_session(region_name='us-east-1')
     asg = boto3.client('autoscaling')
     asg.create_auto_scaling_group(
-        AutoScalingGroupName='WebServerASG',
+        AutoScalingGroupName= AUTO_SCALING_GROUP_NAME,
         LaunchTemplate={
             'LaunchTemplateName': 'WebServerTemplate',
             'Version': '$Latest'
         },
-        MinSize=1,
-        MaxSize=5,
+        MinSize = ASG_MAX_SIZE,
+        MaxSize = ASG_MIN_SIZE,
         DesiredCapacity=1,
         DefaultCooldown=20,
         HealthCheckGracePeriod=80,
@@ -443,7 +451,7 @@ def main():
     boto3.setup_default_session(region_name='us-east-1')
     asg = boto3.client('autoscaling')
     asg.put_scaling_policy(
-        AutoScalingGroupName='WebServerASG',
+        AutoScalingGroupName= AUTO_SCALING_GROUP_NAME,
         PolicyName='ScaleUp',
         PolicyType='SimpleScaling',
         AdjustmentType='ChangeInCapacity',
@@ -451,16 +459,16 @@ def main():
         Cooldown=20
     )
     asg.put_scaling_policy(
-        AutoScalingGroupName='WebServerASG',
+        AutoScalingGroupName= AUTO_SCALING_GROUP_NAME,
         PolicyName='ScaleDown',
         PolicyType='SimpleScaling',
         AdjustmentType='ChangeInCapacity',
-        ScalingAdjustment=-1,
+        ScalingAdjustment=-2,
         Cooldown=20
     )
 
     scale_up_policy_arn = asg.describe_policies(
-        AutoScalingGroupName='WebServerASG',
+        AutoScalingGroupName= AUTO_SCALING_GROUP_NAME,
         PolicyNames=[
             'ScaleUp'
         ]
@@ -468,7 +476,7 @@ def main():
 
 
     scale_down_policy_arn = asg.describe_policies(
-        AutoScalingGroupName='WebServerASG',
+        AutoScalingGroupName= AUTO_SCALING_GROUP_NAME,
         PolicyNames=[
             'ScaleDown'
         ]
@@ -480,7 +488,7 @@ def main():
     cloudwatch = boto3.client('cloudwatch')
     cloudwatch.put_metric_alarm(
         AlarmName='ScaleUp',
-        AlarmDescription='Alarm when server CPU exceeds 80%',
+        AlarmDescription='Alarm when server CPU exceeds 90%',
         AlarmActions=[scale_up_policy_arn],
         ComparisonOperator='GreaterThanOrEqualToThreshold',
         EvaluationPeriods=2,
@@ -489,12 +497,12 @@ def main():
         Namespace='AWS/EC2',
         Period=60,
         Statistic='Average',
-        Threshold=80.0,
+        Threshold=90.0,
         ActionsEnabled=True,
         Dimensions=[
             {
                 'Name': 'AutoScalingGroupName',
-                'Value': 'WebServerASG'
+                'Value': AUTO_SCALING_GROUP_NAME
             },
         ],
     )
@@ -506,14 +514,14 @@ def main():
         Namespace='AWS/EC2',
         Period=60,
         Statistic='Average',
-        Threshold=20.0,
+        Threshold=30.0,
         ActionsEnabled=True,
         AlarmActions=[scale_down_policy_arn],
-        AlarmDescription='Alarm when server CPU is less than 20%',
+        AlarmDescription='Alarm when server CPU is less than 30%',
         Dimensions=[
             {
                 'Name': 'AutoScalingGroupName',
-                'Value': 'WebServerASG'
+                'Value': AUTO_SCALING_GROUP_NAME
             },
         ],
     )
