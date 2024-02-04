@@ -20,7 +20,17 @@ VPC_ID = configuration['vpc_id']
 ASG_MAX_SIZE = configuration['asg_max_size']
 ASG_MIN_SIZE = configuration['asg_min_size']
 HEALTH_CHECK_GRACE_PERIOD = configuration['health_check_grace_period']
-
+COOL_DOWN_PERIOD_SCALE_IN = configuration['cool_down_period_scale_in']
+COOL_DOWN_PERIOD_SCALE_OUT = configuration['cool_down_period_scale_out']
+SCALE_OUT_ADJUSTMENT = configuration['scale_out_adjustment']
+SCALE_IN_ADJUSTMENT = configuration['scale_in_adjustment']
+ASG_DEFAULT_COOL_DOWN_PERIOD = configuration['asg_default_cool_down_period']
+ALARM_PERIOD = configuration['alarm_period']
+CPU_LOWER_THRESHOLD = configuration['cpu_lower_threshold']
+CPU_UPPER_THRESHOLD = configuration['cpu_upper_threshold']
+ALARM_EVALUATION_PERIODS_SCALE_OUT = configuration['alarm_evaluation_periods_scale_out']
+ALARM_EVALUATION_PERIODS_SCALE_IN = configuration['alarm_evaluation_periods_scale_in']
+AUTO_SCALING_TARGET_GROUP = configuration['auto_scaling_target_group']
 
 LOAD_BALANCER_NAME = configuration['load_balancer_name']
 LAUNCH_TEMPLATE_NAME = configuration['launch_template_name']
@@ -136,7 +146,7 @@ def get_test_id(response):
     return regexpr.findall(response_text)[0]
 
 
-def destroy_resources(sg1, sg2, lg, lt, tg, lb, asg, scale_up_policy_arn, scale_down_policy_arn, cloudwatch):
+def destroy_resources(sg1, sg2, lg, lb_arn, asg, cloudwatch):
     """
     Delete all resources created for this task
 
@@ -152,47 +162,70 @@ def destroy_resources(sg1, sg2, lg, lt, tg, lb, asg, scale_up_policy_arn, scale_
     :param msg: message
     :return: None
     """
-    # TODO: implement this method
+    # implement this method
     # delete all resources
     # delete the ASG
-    asg.delete_auto_scaling_group(
-        AutoScalingGroupName='WebServerASG'
-    )
+    try:
+        asg.delete_auto_scaling_group(
+            AutoScalingGroupName= AUTO_SCALING_GROUP_NAME
+        )
+    except botocore.exceptions.ClientError as e:
+        print(e)
     # delete the load balancer
-    elbv2.delete_load_balancer(
-        LoadBalancerArn=lb_arn
-    )
+    elbv2 = boto3.client('elbv2')
+    try:
+        elbv2.delete_load_balancer(
+            LoadBalancerArn=lb_arn
+        )
+    except botocore.exceptions.ClientError as e:
+        print(e)
     # delete the launch template
-    lt.delete_launch_template(
-        LaunchTemplateName=  LAUNCH_TEMPLATE_NAME
-    )
+    ec2 = boto3.client('ec2')
+    try:
+        ec2.delete_launch_template(
+            LaunchTemplateName=  LAUNCH_TEMPLATE_NAME
+        )
+    except botocore.exceptions.ClientError as e:
+        print(e)
     # delete the target group
-    elbv2.delete_target_group(
-        TargetGroupArn=tg_arn
-    )
+    elbv2 = boto3.client('elbv2')
+    try:
+        elbv2.delete_target_group(
+            TargetGroupArn=tg_arn
+        )
+    except botocore.exceptions.ClientError as e:
+        print(e)
     # delete the security groups
-    sg1.delete()
-    sg2.delete()
+    try:
+        sg1.delete()
+        sg2.delete()
+    except botocore.exceptions.ClientError as e:
+        print(e)
     # delete the load generator
-    lg.terminate()
+    try:
+        lg.terminate()
+    except botocore.exceptions.ClientError as e:
+        print(e)
     # delete the scaling policies
-    asg.delete_policy(
-        PolicyName='ScaleUp'
-    )
-    asg.delete_policy(
-        PolicyName='ScaleDown'
-    )
+    try:
+        asg.delete_policy(
+            PolicyName='ScaleUp'
+        )
+        asg.delete_policy(
+            PolicyName='ScaleDown'
+        )
+    except botocore.exceptions.ClientError as e:
+        print(e)
     # delete the cloudwatch alarms
-    cloudwatch.delete_alarms(
-        AlarmNames=[
-            'ScaleUp',
-            'ScaleDown'
-        ]
-    )
-
-
-
-    pass
+    try:
+        cloudwatch.delete_alarms(
+            AlarmNames=[
+                'ScaleUp',
+                'ScaleDown'
+            ]
+        )
+    except botocore.exceptions.ClientError as e:
+        print(e)
 
 
 def print_section(msg):
@@ -253,7 +286,7 @@ def find_security_group_by_name(ec2, group_name):
 # Main routine
 ########################################
 def main():
-    # BIG PICTURE TODO: Programmatically provision autoscaling resources
+    # BIG PICTURE Programmatically provision autoscaling resources
     #   - Create security groups for Load Generator and ASG, ELB
     #   - Provision a Load Generator
     #   - Generate a Launch Template
@@ -332,7 +365,7 @@ def main():
     lt = None
 
     ec2.create_launch_template(
-        LaunchTemplateName='WebServerTemplate',
+        LaunchTemplateName= LAUNCH_TEMPLATE_NAME,
         LaunchTemplateData={
             'ImageId': WEB_SERVICE_AMI,
             'InstanceType': INSTANCE_TYPE,
@@ -351,7 +384,7 @@ def main():
 
 
     print_section('4. Create TG (Target Group)')
-    # TODO: create Target Group
+    # create Target Group
 
 
     boto3.setup_default_session(region_name='us-east-1')
@@ -373,7 +406,7 @@ def main():
 
     print_section('5. Create ELB (Elastic/Application Load Balancer)')
 
-    # TODO create Load Balancer
+    # create Load Balancer
     # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/elbv2.html
     boto3.setup_default_session(region_name='us-east-1')
     elbv2 = boto3.client('elbv2')
@@ -403,7 +436,7 @@ def main():
     print("lb started. ARN={}, DNS={}".format(lb_arn, lb_dns))
 
     print_section('6. Associate ELB with target group')
-    # TODO Associate ELB with target group
+    # Associate ELB with target group
     boto3.setup_default_session(region_name='us-east-1')
     elbv2 = boto3.client('elbv2')
     elbv2.create_listener(
@@ -421,20 +454,20 @@ def main():
 
 
     print_section('7. Create ASG (Auto Scaling Group)')
-    # TODO create Autoscaling group
+    # create Autoscaling group
     boto3.setup_default_session(region_name='us-east-1')
     asg = boto3.client('autoscaling')
     asg.create_auto_scaling_group(
         AutoScalingGroupName= AUTO_SCALING_GROUP_NAME,
         LaunchTemplate={
-            'LaunchTemplateName': 'WebServerTemplate',
+            'LaunchTemplateName': LAUNCH_TEMPLATE_NAME,
             'Version': '$Latest'
         },
         MinSize = ASG_MAX_SIZE,
         MaxSize = ASG_MIN_SIZE,
         DesiredCapacity=1,
-        DefaultCooldown=20,
-        HealthCheckGracePeriod=80,
+        DefaultCooldown= ASG_DEFAULT_COOL_DOWN_PERIOD,
+        HealthCheckGracePeriod= HEALTH_CHECK_GRACE_PERIOD,
         AvailabilityZones=[
             'us-east-1a',
             'us-east-1b'
@@ -447,7 +480,7 @@ def main():
 
 
     print_section('8. Create policy and attached to ASG')
-    # TODO Create Simple Scaling Policies for ASG
+    # Create Simple Scaling Policies for ASG
     boto3.setup_default_session(region_name='us-east-1')
     asg = boto3.client('autoscaling')
     asg.put_scaling_policy(
@@ -455,16 +488,16 @@ def main():
         PolicyName='ScaleUp',
         PolicyType='SimpleScaling',
         AdjustmentType='ChangeInCapacity',
-        ScalingAdjustment=1,
-        Cooldown=20
+        ScalingAdjustment= SCALE_OUT_ADJUSTMENT,
+        Cooldown= COOL_DOWN_PERIOD_SCALE_OUT
     )
     asg.put_scaling_policy(
         AutoScalingGroupName= AUTO_SCALING_GROUP_NAME,
         PolicyName='ScaleDown',
         PolicyType='SimpleScaling',
         AdjustmentType='ChangeInCapacity',
-        ScalingAdjustment=-2,
-        Cooldown=20
+        ScalingAdjustment= SCALE_IN_ADJUSTMENT,
+        Cooldown= COOL_DOWN_PERIOD_SCALE_IN
     )
 
     scale_up_policy_arn = asg.describe_policies(
@@ -483,7 +516,7 @@ def main():
     )['ScalingPolicies'][0]['PolicyARN']
 
     print_section('9. Create Cloud Watch alarm. Action is to invoke policy.')
-    # TODO create CloudWatch Alarms and link Alarms to scaling policies
+    # create CloudWatch Alarms and link Alarms to scaling policies
     boto3.setup_default_session(region_name='us-east-1')
     cloudwatch = boto3.client('cloudwatch')
     cloudwatch.put_metric_alarm(
@@ -491,13 +524,13 @@ def main():
         AlarmDescription='Alarm when server CPU exceeds 90%',
         AlarmActions=[scale_up_policy_arn],
         ComparisonOperator='GreaterThanOrEqualToThreshold',
-        EvaluationPeriods=2,
+        EvaluationPeriods= ALARM_EVALUATION_PERIODS_SCALE_OUT,
         MetricName='CPUUtilization',
         Unit='Percent',
         Namespace='AWS/EC2',
-        Period=60,
+        Period= ALARM_PERIOD ,
         Statistic='Average',
-        Threshold=90.0,
+        Threshold= CPU_UPPER_THRESHOLD,
         ActionsEnabled=True,
         Dimensions=[
             {
@@ -509,12 +542,12 @@ def main():
     cloudwatch.put_metric_alarm(
         AlarmName='ScaleDown',
         ComparisonOperator='LessThanOrEqualToThreshold',
-        EvaluationPeriods=1,
+        EvaluationPeriods= ALARM_EVALUATION_PERIODS_SCALE_IN,
         MetricName='CPUUtilization',
         Namespace='AWS/EC2',
         Period=60,
         Statistic='Average',
-        Threshold=30.0,
+        Threshold= CPU_LOWER_THRESHOLD,
         ActionsEnabled=True,
         AlarmActions=[scale_down_policy_arn],
         AlarmDescription='Alarm when server CPU is less than 30%',
@@ -540,7 +573,7 @@ def main():
     while not is_test_complete(lg_dns, log_name):
         time.sleep(1)
 
-    # destroy_resources()
+    destroy_resources(sg1, sg2, lg, lb_arn, asg, cloudwatch)
 
 
 if __name__ == "__main__":
