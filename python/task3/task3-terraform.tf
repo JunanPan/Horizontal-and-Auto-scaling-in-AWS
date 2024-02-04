@@ -77,9 +77,9 @@ resource "aws_security_group" "elb_asg" {
 # TODO: Add missing values below
 # ================================
 resource "aws_launch_template" "lt" {
-  name            = "<LAUNCH_TEMPLATE_NAME>"
-  image_id        = "<AMI_ID>"
-  instance_type   = "<INSTANCE_TYPE>"
+  name            = "WebServerTemplate"
+  image_id        = "ami-09400c18bd0c0f94f"
+  instance_type   = "m5.large"
 
   monitoring {
     enabled = true
@@ -91,24 +91,24 @@ resource "aws_launch_template" "lt" {
     resource_type = "instance"
     tags = {
       Project = "vm-scaling"
-    }
   }
+}
 }
 
 # Create an auto scaling group with appropriate parameters
 # TODO: fill the missing values per the placeholders
 resource "aws_autoscaling_group" "asg" {
   availability_zones        = ["us-east-1a"]
-  max_size                  = <MAX_NUM_INSTANCES>
-  min_size                  = <MIN_NUM_INSTANCES>
-  desired_capacity          = <DEFAULT_NUM_INSTANCES>
-  default_cooldown          = <COOLDOWN_PERIOD>
-  health_check_grace_period = <HEALTHCHECK_PERIOD>
-  health_check_type         = "<HEALTHCHECK_TYPE>"
+  max_size                  = 2
+  min_size                  = 1
+  desired_capacity          = 1
+  default_cooldown          = 300
+  health_check_grace_period = 300
+  health_check_type         = "EC2"
   launch_template {
     id = aws_launch_template.lt.id
   }
-  target_group_arns         = ["<FILL_IN_AFTER_STEP2>"]
+  target_group_arns         = ["${aws_lb_target_group.web_tg.arn}"]
   tag {
     key = local.asg_tags.key
     value = local.asg_tags.value
@@ -128,17 +128,118 @@ resource "aws_autoscaling_group" "asg" {
 # https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lb_listener
 # https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lb_target_group
 
+resource "aws_lb" "web_alb" {
+  name               = "WebServerLoadBalancer"
+  internal           = false
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.elb_asg.id]
+  subnets            = ["subnet-08e73a11df716f54a", "subnet-026ce3ce52d2b37c0"]
+
+  enable_deletion_protection = false
+
+  tags = local.common_tags
+}
+
+resource "aws_lb_target_group" "web_tg" {
+  name     = "WebServerTargetGroup"
+  port     = 80
+  protocol = "HTTP"
+  vpc_id   = "vpc-0b5feaf149c44ba00"
+
+  health_check {
+    interval            = 30
+    path                = "/"
+    protocol            = "HTTP"
+    matcher             = "200"
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
+    timeout             = 5
+  }
+
+  tags = local.common_tags
+}
+
+resource "aws_lb_listener" "web_listener" {
+  load_balancer_arn = aws_lb.web_alb.arn
+  port              = 80
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.web_tg.arn
+  }
+}
+
+
+
 # Step 3:
 # TODO: Create 2 policies: 1 for scaling out and another for scaling in
 # Link it to the autoscaling group you created above
 # https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/autoscaling_policy
+# Policy for scaling out (adding instances)
+resource "aws_autoscaling_policy" "scale_out" {
+  name                   = "scale_out_policy"
+  scaling_adjustment     = 1
+  adjustment_type        = "ChangeInCapacity"
+  cooldown               = 300
+  autoscaling_group_name = aws_autoscaling_group.asg.name
+
+  policy_type            = "SimpleScaling"
+}
+
+# Policy for scaling in (removing instances)
+resource "aws_autoscaling_policy" "scale_in" {
+  name                   = "scale_in_policy"
+  scaling_adjustment     = -1
+  adjustment_type        = "ChangeInCapacity"
+  cooldown               = 300
+  autoscaling_group_name = aws_autoscaling_group.asg.name
+
+  policy_type            = "SimpleScaling"
+}
+
+
 
 # Step 4:
 # TODO: Create 2 cloudwatch alarms: 1 for scaling out and another for scaling in
 # Link it to the autoscaling group you created above
 # Don't forget to trigger the appropriate policy you created above when alarm is raised
 # https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_metric_alarm
+# CloudWatch Alarm for scaling out
+resource "aws_cloudwatch_metric_alarm" "scale_out_alarm" {
+  alarm_name          = "cpu_high_load"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = "2"
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/EC2"
+  period              = "300"
+  statistic           = "Average"
+  threshold           = "80"
+  alarm_description   = "This metric triggers scale out"
+  alarm_actions       = [aws_autoscaling_policy.scale_out.arn]
 
+  dimensions = {
+    AutoScalingGroupName = aws_autoscaling_group.asg.name
+  }
+}
+
+# CloudWatch Alarm for scaling in
+resource "aws_cloudwatch_metric_alarm" "scale_in_alarm" {
+  alarm_name          = "cpu_low_load"
+  comparison_operator = "LessThanOrEqualToThreshold"
+  evaluation_periods  = "2"
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/EC2"
+  period              = "300"
+  statistic           = "Average"
+  threshold           = "20"
+  alarm_description   = "This metric triggers scale in"
+  alarm_actions       = [aws_autoscaling_policy.scale_in.arn]
+
+  dimensions = {
+    AutoScalingGroupName = aws_autoscaling_group.asg.name
+  }
+}
 
 ######################################
 # SECOND SECTION ENDS                #
