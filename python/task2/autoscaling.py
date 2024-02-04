@@ -573,7 +573,8 @@ def main():
     while not is_test_complete(lg_dns, log_name):
         time.sleep(1)
 
-    destroy_resources(sg1, sg2, lg, lb_arn, asg, cloudwatch)
+    # destroy_resources(sg1, sg2, lg, lb_arn, asg, cloudwatch)
+    # I will destroy manually for now
 
 
 if __name__ == "__main__":
