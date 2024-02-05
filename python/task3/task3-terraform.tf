@@ -136,16 +136,37 @@ resource "aws_instance" "lg" {
 # https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lb_target_group
 
 
-data "aws_subnet_ids" "selected" {
-  vpc_id = "vpc-0b5feaf149c44ba00"
+data "aws_vpc" "selected" {
+  tags = {
+    Name = "Default VPC"
+  }
 }
+
+resource "aws_subnet" "subnet_1" {
+  vpc_id            = data.aws_vpc.selected.id
+  cidr_block        = "10.0.1.0/24"
+  availability_zone = "us-east-1a"
+  tags = {
+    Name = "subnet-1"
+  }
+}
+
+resource "aws_subnet" "subnet_2" {
+  vpc_id            = data.aws_vpc.selected.id
+  cidr_block        = "10.0.2.0/24"
+  availability_zone = "us-east-1b"
+  tags = {
+    Name = "subnet-2"
+  }
+}
+
 
 resource "aws_lb" "web_alb" {
   name               = "WebServerLoadBalancer"
   internal           = false
   load_balancer_type = "application"
   security_groups    = [aws_security_group.elb_asg.id]
-  subnets            = data.aws_subnet_ids.selected.ids
+  subnets            = [aws_subnet.subnet_1.id, aws_subnet.subnet_2.id]
   enable_deletion_protection = false
 
   tags = local.common_tags
@@ -256,3 +277,4 @@ resource "aws_cloudwatch_metric_alarm" "scale_in_alarm" {
 # SECOND SECTION ENDS                #
 # MAKE SURE YOU COMPLETE ALL 4 STEPS #
 ######################################
+
